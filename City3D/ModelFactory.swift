@@ -232,8 +232,8 @@ struct ModelFactory {
         for (wX, wZ) in wheelsData {
             let wheel = ModelEntity(mesh: wheelMesh, materials: [wheelMaterial])
             wheel.position = SIMD3<Float>(wX, 0.13, wZ)
-            // Rotamos el cilindro 90 grados alrededor del eje Z para alinearlo como rueda
-            wheel.orientation = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(0, 0, 1))
+            // Rotamos el cilindro 90 grados alrededor del eje X para alinearlo como rueda hacia los lados
+            wheel.orientation = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(1, 0, 0))
             container.addChild(wheel)
         }
         
