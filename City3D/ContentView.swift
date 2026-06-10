@@ -1,8 +1,8 @@
 //
 //  ContentView.swift
-//  City3D
+//  Ciudad3D
 //
-//  Created by Dannover Arroyave M. on 9/06/26.
+//  Created by Dannover A. on 9/06/26.
 //
 
 import SwiftUI
@@ -12,12 +12,23 @@ struct ContentView: View {
     
     // Configuración del visualizador
     @State private var selectedModel: ModelType = .tree
-    @State private var cameraPreset: CameraPreset = .isometric
+    @State private var cameraPreset: CameraPreset? = .isometric
     @State private var selectedColor: ModelColor = .orange
     @State private var isMetallic: Bool = false
     @State private var isRotating: Bool = true
     @State private var showGrid: Bool = true
-    @State private var inputText: String = "City3D"
+    @State private var inputText: String = "Ciudad3D"
+    
+    // Variables para el control de cámara interactivo (órbita, zoom, paneo)
+    @State private var cameraYaw: Float = 0.7854 // isometric: 45 grados en radianes
+    @State private var cameraPitch: Float = 0.6155 // isometric: 35.26 grados en radianes
+    @State private var cameraDistance: Float = 34.64
+    @State private var cameraPan: SIMD3<Float> = .zero
+    @State private var navigationMode: NavigationMode = .orbit
+    
+    // Estados temporales para los gestos
+    @State private var prevDragTranslation: CGSize = .zero
+    @State private var lastScaleValue: CGFloat = 1.0
     
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -81,7 +92,7 @@ struct ContentView: View {
                         case .pyramid:
                             model = ModelFactory.createPyramid(color: selectedColor, isMetallic: isMetallic)
                         case .text:
-                            model = ModelFactory.createText(text: inputText.isEmpty ? "City3D" : inputText, color: selectedColor, isMetallic: isMetallic)
+                            model = ModelFactory.createText(text: inputText.isEmpty ? "Ciudad3D" : inputText, color: selectedColor, isMetallic: isMetallic)
                         }
                         
                         modelAnchor.addChild(model)
@@ -93,14 +104,17 @@ struct ContentView: View {
                         if isRotating {
                             if model.name != "rotating" {
                                 model.stopAllAnimations()
-                                let rotation = Transform(rotation: simd_quatf(angle: .pi * 2, axis: [0, 1, 0]))
-                                if let animation = try? AnimationResource.generate(with: FromToByAnimation(
-                                    to: rotation,
+                                let orbit = OrbitAnimation(
+                                    name: "rotating",
                                     duration: 8.0,
-                                    bindTarget: .transform,
-                                    repeatMode: .repeat
-                                )) {
-                                    model.playAnimation(animation)
+                                    axis: [0, 1, 0],
+                                    startTransform: Transform(),
+                                    spinClockwise: true,
+                                    orientToPath: false,
+                                    bindTarget: .transform
+                                )
+                                if let animation = try? AnimationResource.generate(with: orbit) {
+                                    model.playAnimation(animation.repeat())
                                     model.name = "rotating"
                                 }
                             }
@@ -115,6 +129,74 @@ struct ContentView: View {
             }
             .background(Color.black)
             .edgesIgnoringSafeArea(.all)
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        if cameraPreset != nil {
+                            cameraPreset = nil
+                        }
+                        
+                        let deltaX = Float(value.translation.width - prevDragTranslation.width)
+                        let deltaY = Float(value.translation.height - prevDragTranslation.height)
+                        prevDragTranslation = value.translation
+                        
+                        if navigationMode == .orbit {
+                            // Cambiar ángulos de órbita (rotar cámara)
+                            cameraYaw -= deltaX * 0.005
+                            cameraPitch += deltaY * 0.005
+                            
+                            // Limitar pitch para evitar gimbal lock / inversión
+                            cameraPitch = max(-1.4, min(1.4, cameraPitch))
+                        } else {
+                            // Paneo (Desplazar el objetivo de la cámara)
+                            let target = SIMD3<Float>(0, 0.4, 0) + cameraPan
+                            let cosPitch = cos(cameraPitch)
+                            let sinPitch = sin(cameraPitch)
+                            let cosYaw = cos(cameraYaw)
+                            let sinYaw = sin(cameraYaw)
+                            let offset = SIMD3<Float>(
+                                cameraDistance * cosPitch * sinYaw,
+                                cameraDistance * sinPitch,
+                                cameraDistance * cosPitch * cosYaw
+                            )
+                            let cameraPosition = target + offset
+                            
+                            let forward = simd_normalize(target - cameraPosition)
+                            let right: SIMD3<Float>
+                            if abs(forward.y) > 0.99 {
+                                right = SIMD3<Float>(1, 0, 0)
+                            } else {
+                                right = simd_normalize(simd_cross(forward, SIMD3<Float>(0, 1, 0)))
+                            }
+                            let up = simd_cross(right, forward)
+                            
+                            // Paneo proporcional a la distancia del zoom
+                            let factor = cameraDistance * 0.0015
+                            let moveHorizontal = right * (-deltaX * factor)
+                            let moveVertical = up * (deltaY * factor)
+                            cameraPan += moveHorizontal + moveVertical
+                        }
+                    }
+                    .onEnded { _ in
+                        prevDragTranslation = .zero
+                    }
+            )
+            .simultaneousGesture(
+                MagnificationGesture()
+                    .onChanged { scale in
+                        if cameraPreset != nil {
+                            cameraPreset = nil
+                        }
+                        
+                        let factor = Float(scale / lastScaleValue)
+                        lastScaleValue = scale
+                        // Zoom/Distancia entre 5.0 y 80.0
+                        cameraDistance = max(5.0, min(80.0, cameraDistance / factor))
+                    }
+                    .onEnded { _ in
+                        lastScaleValue = 1.0
+                    }
+            )
             
             // Panel de Control Flotante (Glassmorphism)
             controlPanel
@@ -131,7 +213,7 @@ struct ContentView: View {
                 // Cabecera y Presets de Cámara
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("City3D Studio")
+                        Text("Ciudad3D Studio")
                             .font(.title2)
                             .fontWeight(.bold)
                             .foregroundColor(.white)
@@ -146,8 +228,9 @@ struct ContentView: View {
                     HStack(spacing: 8) {
                         ForEach(CameraPreset.allCases) { preset in
                             Button(action: {
-                                withAnimation {
+                                withAnimation(.spring(response: 0.6, dampingFraction: 0.85)) {
                                     cameraPreset = preset
+                                    applyPreset(preset)
                                 }
                             }) {
                                 Image(systemName: preset.iconName)
@@ -276,6 +359,52 @@ struct ContentView: View {
                     Divider()
                         .background(Color.white.opacity(0.1))
                     
+                    // Control de navegación de cámara (Modo Órbita / Modo Paneo)
+                    HStack {
+                        Text("CÁMARA")
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.gray)
+                        
+                        Spacer()
+                        
+                        Picker("Modo de Interacción", selection: $navigationMode) {
+                            ForEach(NavigationMode.allCases) { mode in
+                                Image(systemName: mode.iconName)
+                                    .tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 100)
+                    }
+                    .padding(.horizontal)
+                    
+                    // Control de Zoom mediante Slider
+                    HStack(spacing: 12) {
+                        Image(systemName: "magnifyingglass.decrease")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                        
+                        Slider(value: Binding(
+                            get: { Double(cameraDistance) },
+                            set: {
+                                cameraDistance = Float($0)
+                                if cameraPreset != nil {
+                                    cameraPreset = nil
+                                }
+                            }
+                        ), in: 5...80)
+                        .tint(.orange)
+                        
+                        Image(systemName: "magnifyingglass.increase")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                    }
+                    .padding(.horizontal)
+                    
+                    Divider()
+                        .background(Color.white.opacity(0.1))
+                    
                     // Opciones globales de la escena (Rotación y Cuadrícula)
                     HStack(spacing: 20) {
                         Toggle(isOn: $isRotating) {
@@ -324,22 +453,47 @@ struct ContentView: View {
     }
     
     private func updateCamera(_ camera: PerspectiveCamera) {
-        let targetPosition: SIMD3<Float>
-        switch cameraPreset {
-        case .isometric:
-            targetPosition = SIMD3<Float>(20.0, 20.0, 20.0)
-        case .top:
-            targetPosition = SIMD3<Float>(0.01, 28.0, 0.01) // Evitar bloqueo de cardán en 0, 28, 0
-        case .front:
-            targetPosition = SIMD3<Float>(0.0, 5.0, 25.0)
-        }
+        let target = SIMD3<Float>(0, 0.4, 0) + cameraPan
+        
+        let cosPitch = cos(cameraPitch)
+        let sinPitch = sin(cameraPitch)
+        let cosYaw = cos(cameraYaw)
+        let sinYaw = sin(cameraYaw)
+        
+        let offset = SIMD3<Float>(
+            cameraDistance * cosPitch * sinYaw,
+            cameraDistance * sinPitch,
+            cameraDistance * cosPitch * cosYaw
+        )
+        
+        let targetPosition = target + offset
         
         camera.position = targetPosition
         camera.look(
-            at: SIMD3<Float>(0, 0.4, 0), // Apuntar al centro aproximado del modelo
+            at: target,
             from: targetPosition,
             relativeTo: nil
         )
+    }
+    
+    private func applyPreset(_ preset: CameraPreset) {
+        switch preset {
+        case .isometric:
+            cameraYaw = 0.7854  // 45 grados en radianes
+            cameraPitch = 0.6155 // 35.26 grados en radianes
+            cameraDistance = 34.64
+            cameraPan = .zero
+        case .top:
+            cameraYaw = 0.0
+            cameraPitch = 1.56   // 89.9 grados en radianes (evita gimbal lock)
+            cameraDistance = 28.0
+            cameraPan = .zero
+        case .front:
+            cameraYaw = 0.0
+            cameraPitch = 0.197  // 11.3 grados en radianes
+            cameraDistance = 25.5
+            cameraPan = .zero
+        }
     }
     
     /// Genera una cuadrícula tridimensional usando cajas delgadas
@@ -391,6 +545,20 @@ enum CameraPreset: String, CaseIterable, Identifiable {
         case .isometric: return "cube"
         case .top: return "arrow.down"
         case .front: return "eye"
+        }
+    }
+}
+
+enum NavigationMode: String, CaseIterable, Identifiable {
+    case orbit = "Órbita"
+    case pan = "Paneo"
+    
+    var id: String { self.rawValue }
+    
+    var iconName: String {
+        switch self {
+        case .orbit: return "rotate.3d"
+        case .pan: return "hand.raised"
         }
     }
 }
