@@ -1,8 +1,8 @@
 //
 //  ModelFactory.swift
-//  City3D
+//  Ciudad3D
 //
-//  Created by Dannover Arroyave M. on 9/06/26.
+//  Created by Dannover A. on 9/06/26.
 //
 
 import SwiftUI
@@ -63,7 +63,7 @@ struct ModelFactory {
         let material = SimpleMaterial(color: color.platformColor, isMetallic: isMetallic)
         let entity = ModelEntity(mesh: mesh, materials: [material])
         // El plano es horizontal por defecto en XZ, no requiere elevación
-        entity.position = SIMD3<Float>(0, 0.01, 0) 
+        entity.position = SIMD3<Float>(0, 0.01, 0)
         return entity
     }
     
@@ -87,17 +87,34 @@ struct ModelFactory {
     
     /// Crea texto 3D en el origen
     static func createText(text: String, color: ModelColor, isMetallic: Bool) -> ModelEntity {
+        // Usamos un tamaño de fuente estándar (12 puntos) para evitar problemas de rasterización de fuentes diminutas en macOS/iOS,
+        // y luego aplicamos una escala sobre la entidad para conseguir el tamaño 3D deseado.
+        let baseFontSize: CGFloat = 12.0
+        let targetHeight: Float = 0.4
+        let scaleFactor = targetHeight / Float(baseFontSize) // 0.4 / 12.0 = 0.03333
+        
+        #if os(macOS)
+        let font = NSFont.systemFont(ofSize: baseFontSize, weight: .bold)
+        #else
+        let font = UIFont.systemFont(ofSize: baseFontSize, weight: .bold)
+        #endif
+        
+        // Marco contenedor proporcional al tamaño de la fuente para centrar el texto
+        let containerFrame = CGRect(x: -25, y: -6, width: 50, height: 12)
+        
         let mesh = MeshResource.generateText(
             text,
-            extrusionDepth: 0.15,
-            font: .systemFont(ofSize: 0.4, weight: .bold),
-            containerFrame: CGRect(x: -1, y: -0.2, width: 2, height: 0.4),
+            extrusionDepth: 0.15 / scaleFactor, // Escalamos el espesor para obtener 0.15m reales tras aplicar escala
+            font: font,
+            containerFrame: containerFrame,
             alignment: .center,
-            lineBreakMode: .byWordWrapping
+            lineBreakMode: .byTruncatingTail
         )
         let material = SimpleMaterial(color: color.platformColor, isMetallic: isMetallic)
         let entity = ModelEntity(mesh: mesh, materials: [material])
-        entity.position = SIMD3<Float>(0, 0.2, 0)
+        
+        entity.scale = SIMD3<Float>(repeating: scaleFactor)
+        entity.position = SIMD3<Float>(0, 0.2, 0) // Centrar y elevar
         return entity
     }
     
